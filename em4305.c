@@ -41,8 +41,12 @@ static void usage(void)
 					"    The device that connect to RFID RW board, default /dev/ttyUSB0.\n\n"
 					"  -1 decimal number\n"
 					"    The first data that write to ID card.\n\n"
-					"  -2 decimal number\n"
+					"  -2 decimal custom id\n"
+					"    The first custom id that write to ID card.\n\n"
+					"  -3 decimal number\n"
 					"    The second data that write to ID card.\n\n"
+					"  -4 decimal custom id\n"
+					"    The second custom id that write to ID card.\n\n"
 					);
 }
 
@@ -132,7 +136,7 @@ static int em4305_readn(const unsigned char *cmd, int cmdlen, unsigned char *dat
 	return -1;
 }
 
-static void em4305_makeid(unsigned long number, unsigned char *page_first, unsigned char *page_second)
+static void em4305_makeid(unsigned char cid, unsigned long number, unsigned char *page_first, unsigned char *page_second)
 {
 	unsigned char ids[BYTES_OF_ID];  
 	unsigned char col_cs = 0; /* column checksum */
@@ -147,8 +151,11 @@ static void em4305_makeid(unsigned long number, unsigned char *page_first, unsig
 	ids[0] = 0xFF;
 	ids[1] = 0x80;
 	pos -= 5; /* lowest is 5 bits column checksum */
-	for (i = 0; i < 32; i++) {
-		bit = (number >> i) & 0x1;
+	for (i = 0; i < (32+8); i++) {
+		if (i < 32)
+			bit = (number >> i) & 0x1;
+		else
+			bit = (cid >> (i-32)) & 0x1;
 		cs = (((col_cs >> ((i%4)+1)) & 0x1) + bit) % 2;
 		if (cs)
 			col_cs |= 1 << ((i%4)+1);
@@ -225,6 +232,7 @@ int main(int argc, char **argv)
 	int opt;
 	char portname[32] = {0};
 	unsigned long data1 = 0, data2 = 0;
+	unsigned char cid1 = 0, cid2 = 0;
 	int data_mask = 0;
 	int read_mode = 0;
 	int i, len;
@@ -238,7 +246,7 @@ int main(int argc, char **argv)
 		return -1;
 	}
 	
-	while ((opt = getopt(argc, argv, "s:1:2:rh")) != -1) {
+	while ((opt = getopt(argc, argv, "s:1:2:3:4:rh")) != -1) {
 		switch (opt) {
 			case 's':
 				strncpy(portname, optarg, sizeof(portname) - 1);
@@ -248,8 +256,14 @@ int main(int argc, char **argv)
 				data_mask |= 0x1;
 				break;
 			case '2':
+				cid1 = (unsigned char)atol(optarg);
+				break;
+			case '3':
 				data2 = (unsigned long)atol(optarg);
 				data_mask |= 0x2;
+				break;
+			case '4':
+				cid2 = (unsigned char)atol(optarg);
 				break;
 			case 'r':
 				read_mode = 1;
@@ -299,7 +313,7 @@ int main(int argc, char **argv)
 				if (em4305_readn(EM4305_CMD_READ_PAGE8, sizeof(EM4305_CMD_READ_PAGE8), rbuf) == 0)
 					printf("PAGE8 : %02X%02X%02X%02X\n", rbuf[0], rbuf[1], rbuf[2], rbuf[3]);
 			} else {
-				em4305_makeid(data1, id_page_first, id_page_second);
+				em4305_makeid(cid1, data1, id_page_first, id_page_second);
 				printf("Write PAGE5: %02X%02X%02X%02X\n", id_page_first[0], id_page_first[1], id_page_first[2], id_page_first[3]);
 				if (em4305_write_data(5, id_page_first) != 0) {
 					printf("failed to write PAGE5!\n");
@@ -314,7 +328,7 @@ int main(int argc, char **argv)
 				conf_page = EM4305_CONF_SING;
 				
 				if (data_mask & 0x2) {
-					em4305_makeid(data2, id_page_first, id_page_second);
+					em4305_makeid(cid2, data2, id_page_first, id_page_second);
 					printf("Write PAGE7: %02X%02X%02X%02X\n", id_page_first[0], id_page_first[1], id_page_first[2], id_page_first[3]);
 					if (em4305_write_data(7, id_page_first) != 0) {
 						printf("failed to write PAGE7!\n");
